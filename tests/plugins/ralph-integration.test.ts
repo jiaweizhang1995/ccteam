@@ -23,7 +23,7 @@ function mkCtx(args: string, overrides: Partial<PluginContext> = {}): PluginCont
 
 describe('ralph-loop activation (runtime loop wiring)', () => {
   it('invokes activateRalphLoop with <promise>DONE</promise> and default maxIterations', async () => {
-    const calls: Array<{ promise: string; maxIterations: number | undefined }> = [];
+    const calls: Array<{ promise: string | null; maxIterations: number | undefined }> = [];
     await ralphLoopBuiltin(mkCtx('ship feature X', {
       activateRalphLoop: (promise, maxIterations) => { calls.push({ promise, maxIterations }); },
     }));

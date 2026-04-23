@@ -1,5 +1,6 @@
 import { PLAN_PLUGIN, planBuiltin } from './plan.js';
 import { RALPH_LOOP_PLUGIN, ralphLoopBuiltin } from './ralph-loop.js';
+import { CANCEL_PLUGIN, cancelBuiltin } from './cancel.js';
 import type { PluginRegistry } from '../registry.js';
 
 /**
@@ -12,6 +13,9 @@ export function registerBuiltins(registry: PluginRegistry): void {
 
   registry.register(RALPH_LOOP_PLUGIN);
   registry.registerBuiltin('ralph-loop', ralphLoopBuiltin);
+
+  registry.register(CANCEL_PLUGIN);
+  registry.registerBuiltin('cancel', cancelBuiltin);
 }
 
-export { PLAN_PLUGIN, planBuiltin, RALPH_LOOP_PLUGIN, ralphLoopBuiltin };
+export { PLAN_PLUGIN, planBuiltin, RALPH_LOOP_PLUGIN, ralphLoopBuiltin, CANCEL_PLUGIN, cancelBuiltin };
