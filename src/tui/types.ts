@@ -2,6 +2,19 @@
 
 export type AgentStatus = 'spawning' | 'active' | 'idle' | 'shutdown';
 
+export interface PlanResult {
+  steps: string[];
+  suggestedAgents: number | null;
+  rawText: string;
+}
+
+export interface PlanState {
+  active: boolean;
+  text: string;
+  parsed: PlanResult | null;
+  awaitingConfirm: boolean;
+}
+
 export interface TeammateState {
   id: string;
   name: string;
@@ -36,4 +49,5 @@ export interface AppState {
   focus: FocusTarget;
   showTaskList: boolean;
   inputValue: string;
+  planState?: PlanState;
 }

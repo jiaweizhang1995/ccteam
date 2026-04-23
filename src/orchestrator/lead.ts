@@ -6,11 +6,18 @@ import { createBackend } from '../providers/factory.js';
 import { createInProcessServer } from '../mcp-server/server.js';
 import { StateAdapter } from '../mcp-server/state-adapter.js';
 import { killAllTeammates, cleanupOrphans } from './orphan-cleanup.js';
-import { resolvePermissionMode } from './permissions.js';
+import { resolvePermissionMode, type PermissionMode } from './permissions.js';
 import { loadSubagentDefs } from './subagent-defs.js';
 import { loadConfig } from '../config/loader.js';
 import { writeMcpConfigForProvider, getCodexMcpOverrides } from './mcp-config-writer.js';
-import type { AgentEvent, ChatMessage, ToolSpec } from '../providers/types.js';
+import { parsePlanOutput } from '../providers/plan-mode.js';
+import type { AgentBackend, AgentEvent, ChatMessage, ToolSpec } from '../providers/types.js';
+
+export interface PlanResult {
+  steps: string[];
+  suggestedAgents: number | null;
+  rawText: string;
+}
 
 export interface TeamLeadOpts {
   teamName: string;
@@ -36,6 +43,9 @@ export class TeamLead {
   private controller = new AbortController();
   private conversation: ChatMessage[] = [];
   private mcpCleanup?: () => Promise<void>;
+  private backend!: AgentBackend;
+  private permissionMode!: PermissionMode;
+  private teammateProviderId!: string;
 
   constructor(opts: TeamLeadOpts) {
     this.opts = opts;
@@ -46,13 +56,15 @@ export class TeamLead {
     this.state = new State(dbPath);
 
     const workingDir = this.opts.workingDir ?? process.cwd();
-    const permissionMode = resolvePermissionMode({ dangerouslySkipPermissions: this.opts.dangerouslySkipPermissions });
+    this.permissionMode = resolvePermissionMode({ dangerouslySkipPermissions: this.opts.dangerouslySkipPermissions });
+    const permissionMode = this.permissionMode;
 
     cleanupOrphans(this.state, this.opts.teamName);
 
     const config = loadConfig(workingDir);
     const leadProviderId = this.opts.leadProvider ?? config.defaults.lead ?? 'claude-oauth';
-    const teammateProviderId = this.opts.teammateProvider ?? config.defaults.teammate ?? leadProviderId;
+    this.teammateProviderId = this.opts.teammateProvider ?? config.defaults.teammate ?? leadProviderId;
+    const teammateProviderId = this.teammateProviderId;
     const leadProviderConfigBase = config.providers.get(leadProviderId) ?? { type: leadProviderId as 'anthropic-oauth' };
 
     const leadSessionId = uuidv4();
@@ -119,7 +131,8 @@ export class TeamLead {
       },
     }));
 
-    const backend = createBackend('lead', leadProviderConfig);
+    this.backend = createBackend('lead', leadProviderConfig);
+    const backend = this.backend;
 
     const systemPrompt = `You are the team lead for team "${this.opts.teamName}". Coordinate your teammates using the available tools. Use spawn_teammate to create teammates, create tasks for them to claim, monitor progress via list_tasks and list_teammates, and synthesize a final result when all tasks are complete. Be concise and efficient.`;
 
@@ -298,6 +311,119 @@ export class TeamLead {
     }
 
     notifier.stop();
+  }
+
+  async runPlanMode(
+    goal: string,
+    onStream: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<PlanResult> {
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'plan_started',
+      payload: JSON.stringify({ goal }),
+      created_at: Date.now(),
+    });
+
+    const effectiveSignal = signal ?? new AbortController().signal;
+    let rawText = '';
+
+    const result = await this.backend.run({
+      systemPrompt: `You are the team lead for team "${this.opts.teamName}".`,
+      messages: [{ role: 'user', content: goal }],
+      tools: [],
+      signal: effectiveSignal,
+      onEvent: (e: AgentEvent) => {
+        if (e.type === 'text_delta') {
+          rawText += e.text;
+          onStream(e.text);
+        }
+      },
+      planMode: true,
+    });
+
+    if (result.error) {
+      const err = Object.assign(new Error(result.error), { name: 'Error' });
+      throw err;
+    }
+
+    if (effectiveSignal.aborted) {
+      throw Object.assign(new Error('Plan generation aborted'), { name: 'AbortError' });
+    }
+
+    const fullText = rawText || result.text;
+    const parsed = parsePlanOutput(fullText);
+
+    const planResult: PlanResult = {
+      steps: parsed.steps,
+      suggestedAgents: parsed.suggestedAgents,
+      rawText: fullText,
+    };
+
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'plan_completed',
+      payload: JSON.stringify({ steps: planResult.steps, suggestedAgents: planResult.suggestedAgents }),
+      created_at: Date.now(),
+    });
+
+    return planResult;
+  }
+
+  async executeFromPlan(
+    plan: PlanResult,
+    agentCount: number,
+    namePrefix = 'agent',
+  ): Promise<void> {
+    const { spawnTeammate } = await import('./spawn.js');
+
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'plan_confirmed',
+      payload: JSON.stringify({ agentCount }),
+      created_at: Date.now(),
+    });
+
+    // Spawn N teammates
+    for (let i = 1; i <= agentCount; i++) {
+      const name = `${namePrefix}-${i}`;
+      const spawned = await spawnTeammate(this.state, {
+        teamName: this.opts.teamName,
+        name,
+        provider: this.teammateProviderId,
+        permissionMode: this.permissionMode,
+      });
+
+      this.state.appendEvent({
+        team_name: this.opts.teamName,
+        agent: 'orchestrator',
+        kind: 'teammate_spawned',
+        payload: JSON.stringify({ name, id: spawned.id, provider: this.teammateProviderId, status: 'spawning' }),
+        created_at: Date.now(),
+      });
+    }
+
+    // Create one task per plan step
+    for (const step of plan.steps) {
+      this.state.createTask({
+        id: uuidv4(),
+        team_name: this.opts.teamName,
+        title: step,
+        description: null,
+        status: 'pending',
+        assigned_to: null,
+        claim_lock_owner: null,
+        claim_lock_expires: null,
+        depends_on: null,
+        result: null,
+        created_by: 'lead',
+        created_at: Date.now(),
+        updated_at: Date.now(),
+      });
+    }
   }
 
   async shutdown(): Promise<void> {

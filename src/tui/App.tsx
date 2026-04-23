@@ -5,27 +5,34 @@ import { TeammatePane } from './TeammatePane.js';
 import { TaskListPanel } from './TaskListPanel.js';
 import { InputBar } from './InputBar.js';
 import { Keybinds } from './Keybinds.js';
-import type { AppState, FocusTarget } from './types.js';
+import { PlanPanel } from './PlanPanel.js';
+import type { AppState, FocusTarget, PlanState, PlanResult } from './types.js';
 
 interface Props {
-  // Live state: leadEvents, teammates, tasks, teamName are updated by parent (useTeamState).
-  // App owns local UI state: focus, showTaskList, inputValue.
   initialState: AppState;
   onSendMessage?: (target: FocusTarget, text: string) => void;
   onInterrupt?: (target: FocusTarget) => void;
+  onPlanRequest?: (goal: string) => void;
+  onPlanConfirm?: (plan: PlanResult, agentCount: number) => void;
+  // Called on every render with the current setPlanState so run.ts can stream deltas in.
+  onSetPlanState?: (setter: (s: PlanState | ((prev: PlanState) => PlanState)) => void) => void;
 }
 
 const TASK_PANEL_WIDTH = 36;
 
-export function App({ initialState, onSendMessage, onInterrupt }: Props) {
-  // Live content from parent — re-renders as parent passes updated state down.
+const IDLE_PLAN: PlanState = { active: false, text: '', parsed: null, awaitingConfirm: false };
+
+export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, onPlanConfirm, onSetPlanState }: Props) {
   const { teamName, leadEvents, teammates, tasks } = initialState;
 
-  // Local UI-only state — not driven by notifier after mount.
   const [focus, setFocus] = useState<FocusTarget>(initialState.focus);
   const [showTaskList, setShowTaskList] = useState(initialState.showTaskList);
   const [inputValue, setInputValue] = useState(initialState.inputValue);
   const [inputActive, setInputActive] = useState(false);
+  const [planState, setPlanState] = useState<PlanState>(initialState.planState ?? IDLE_PLAN);
+
+  // Keep the external ref current so run.ts can push streaming deltas into planState.
+  onSetPlanState?.(setPlanState as (s: PlanState | ((prev: PlanState) => PlanState)) => void);
 
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 120;
@@ -50,14 +57,48 @@ export function App({ initialState, onSendMessage, onInterrupt }: Props) {
 
   const handleInputSubmit = useCallback(
     (value: string) => {
-      if (value.trim()) {
-        onSendMessage?.(focus, value.trim());
+      const trimmed = value.trim();
+      if (!trimmed) return;
+
+      const planMatch = trimmed.match(/^\/plan\s+(.+)$/i);
+      if (planMatch) {
         setInputValue('');
         setInputActive(false);
+        setPlanState({ active: true, text: '', parsed: null, awaitingConfirm: false });
+        onPlanRequest?.(planMatch[1]!.trim());
+        return;
       }
+
+      onSendMessage?.(focus, trimmed);
+      setInputValue('');
+      setInputActive(false);
     },
-    [focus, onSendMessage],
+    [focus, onSendMessage, onPlanRequest],
   );
+
+  const handlePlanConfirm = useCallback(
+    (agentCount: number) => {
+      if (!planState.parsed) return;
+      onPlanConfirm?.(planState.parsed, agentCount);
+      setPlanState(IDLE_PLAN);
+    },
+    [planState.parsed, onPlanConfirm],
+  );
+
+  const handlePlanCancel = useCallback(() => setPlanState(IDLE_PLAN), []);
+
+  if (planState.active) {
+    return (
+      <Box flexDirection="column" width={termWidth}>
+        <PlanPanel
+          plan={planState}
+          termWidth={termWidth}
+          onConfirm={handlePlanConfirm}
+          onCancel={handlePlanCancel}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" width={termWidth}>
@@ -94,6 +135,7 @@ export function App({ initialState, onSendMessage, onInterrupt }: Props) {
 
       <InputBar
         focus={focus}
+        teammates={teammates}
         value={inputValue}
         onChange={handleInputChange}
         onSubmit={handleInputSubmit}

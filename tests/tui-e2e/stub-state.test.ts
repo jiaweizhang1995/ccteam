@@ -144,7 +144,7 @@ describe('InputBar hint text', () => {
     expect(lastFrame()).toContain('[lead]');
   });
 
-  it('shows [teammate 1] label when focus is teammate index 0', () => {
+  it('shows teammate name label when focus is teammate index 0', () => {
     const state = makeState({
       focus: 0,
       teammates: [{
@@ -153,6 +153,6 @@ describe('InputBar hint text', () => {
       }],
     });
     const { lastFrame } = render(React.createElement(App, { initialState: state }));
-    expect(lastFrame()).toContain('[teammate 1]');
+    expect(lastFrame()).toContain('[alice]');
   });
 });
