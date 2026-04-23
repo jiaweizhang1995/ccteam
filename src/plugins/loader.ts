@@ -120,6 +120,79 @@ export function loadClaudeSkills(): Plugin[] {
 }
 
 /**
+ * Discover Claude Code plugin slash commands. Modern plugins live in
+ * `~/.claude/plugins/marketplaces/<marketplace>/[plugins/<plugin>/]commands/`
+ * as either `.md` (with frontmatter) or `.toml` (with description + prompt).
+ *
+ * We expose each as `/claude-<filename-stem>` to avoid colliding with our
+ * `/skill-<name>` bridge or builtins.
+ */
+export function loadClaudePluginCommands(): Plugin[] {
+  const base = join(homedir(), '.claude', 'plugins', 'marketplaces');
+  if (!existsSync(base)) return [];
+  const out: Plugin[] = [];
+
+  // Walk to find all 'commands' dirs nested anywhere under marketplaces
+  const commandDirs: string[] = [];
+  const stack = [base];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    let entries: string[];
+    try { entries = readdirSync(cur); } catch { continue; }
+    for (const entry of entries) {
+      const full = join(cur, entry);
+      let stats;
+      try { stats = statSync(full); } catch { continue; }
+      if (stats.isDirectory()) {
+        if (entry === 'commands') commandDirs.push(full);
+        else if (entry !== 'node_modules' && entry !== '.git') stack.push(full);
+      }
+    }
+  }
+
+  for (const dir of commandDirs) {
+    let files: string[];
+    try { files = readdirSync(dir); } catch { continue; }
+    for (const file of files) {
+      if (!file.endsWith('.md') && !file.endsWith('.toml')) continue;
+      const full = join(dir, file);
+      const stem = file.replace(/\.(md|toml)$/, '');
+      let description = '';
+      let body = '';
+      try {
+        const content = readFileSync(full, 'utf8');
+        if (file.endsWith('.toml')) {
+          // Simple TOML: key = "..." lines
+          const descMatch = content.match(/^description\s*=\s*"((?:[^"\\]|\\.)*)"/m);
+          const promptMatch = content.match(/^prompt\s*=\s*"((?:[^"\\]|\\.)*)"/m);
+          if (descMatch) description = descMatch[1]!.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+          if (promptMatch) body = promptMatch[1]!.replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        } else {
+          const fmMatch = content.match(FRONTMATTER_RE);
+          if (fmMatch) {
+            const fm = parseFrontmatter(fmMatch[1]!);
+            description = String(fm.description ?? '');
+            body = (fmMatch[2] ?? '').trim();
+          } else {
+            body = content.trim();
+          }
+        }
+      } catch { continue; }
+      out.push({
+        name: stem,
+        command: `/claude-${stem}`,
+        description: description.slice(0, 120),
+        handler: 'prompt-prepend',
+        body,
+        filePath: full,
+        source: 'claude-plugin-commands',
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Best-effort bridge: discover Codex plugins at ~/.codex/plugins.
  * Layout varies by codex version; we look for any directory containing a
  * plugin.md or .plugin.md file.
@@ -160,6 +233,7 @@ export function loadAllPlugins(projectDir: string): Plugin[] {
     ...loadPluginsFromDir(projectCcDir, 'project'),
     ...loadPluginsFromDir(userDir, 'user'),
     ...loadClaudeSkills(),
+    ...loadClaudePluginCommands(),
     ...loadCodexPlugins(),
   ];
 }

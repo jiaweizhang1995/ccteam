@@ -46,9 +46,21 @@ export class TeamLead {
   private backend!: AgentBackend;
   private permissionMode!: PermissionMode;
   private teammateProviderId!: string;
+  /** Ralph-loop mode: when non-null, lead keeps iterating until this string appears in output. */
+  private ralphPromise: string | null = null;
+  private ralphIteration = 0;
+  private ralphMaxIterations = 20;
 
   constructor(opts: TeamLeadOpts) {
     this.opts = opts;
+  }
+
+  /** Activate ralph-loop. Lead keeps going until promise appears or max hit. */
+  setRalphPromise(promise: string | null, maxIterations = 20): void {
+    this.ralphPromise = promise;
+    this.ralphMaxIterations = maxIterations;
+    this.ralphIteration = 0;
+    if (promise) this.opts.onEvent('lead', 'ralph_loop_active', { promise, maxIterations });
   }
 
   async run(): Promise<void> {
@@ -257,12 +269,38 @@ export class TeamLead {
       }
 
       // For CLI-subprocess leads, the subprocess handled its own tool loop.
-      // Surface any text and exit after one turn.
+      // Surface any text and exit after one turn — unless ralph-loop is active.
       if (isCliSubprocessLead) {
         if (result.text) {
           this.conversation.push({ role: 'assistant', content: result.text });
         }
         this.opts.onEvent('lead', 'done', { stop_reason: result.stop_reason });
+
+        if (this.ralphPromise && result.text && result.text.includes(this.ralphPromise)) {
+          this.opts.onEvent('lead', 'ralph_completed', {
+            promise: this.ralphPromise,
+            iteration: this.ralphIteration,
+          });
+          this.ralphPromise = null;
+          break;
+        }
+        if (this.ralphPromise) {
+          this.ralphIteration++;
+          if (this.ralphIteration >= this.ralphMaxIterations) {
+            this.opts.onEvent('lead', 'ralph_max_iterations', {
+              promise: this.ralphPromise, iteration: this.ralphIteration,
+            });
+            this.ralphPromise = null;
+            break;
+          }
+          this.opts.onEvent('lead', 'ralph_iteration', { iteration: this.ralphIteration });
+          // Inject continue-prompt and keep looping
+          this.conversation.push({
+            role: 'user',
+            content: `Continue working on the task. Previous turn output did not include <promise>${this.ralphPromise}</promise>. Make additional concrete progress. Only emit <promise>${this.ralphPromise}</promise> when the task is genuinely complete.`,
+          });
+          continue;
+        }
         break;
       }
 
@@ -298,14 +336,37 @@ export class TeamLead {
         }
         this.conversation.push({ role: 'user', content: toolResultContent });
       } else {
-        // No tool calls — model finished. Provider-specific stop_reasons
-        // ('end_turn' for Anthropic, 'stop' for OpenAI/Codex, 'length', etc.)
-        // all terminate the turn. Break always to avoid infinite re-query.
+        // No tool calls — model finished this turn.
         if (result.text) {
           this.conversation.push({ role: 'assistant', content: result.text });
           this.opts.onEvent('lead', 'text_delta', { text: result.text });
         }
         this.opts.onEvent('lead', 'done', { stop_reason: result.stop_reason });
+
+        // Ralph-loop: keep iterating until promise appears or max iterations.
+        if (this.ralphPromise && result.text && result.text.includes(this.ralphPromise)) {
+          this.opts.onEvent('lead', 'ralph_completed', {
+            promise: this.ralphPromise, iteration: this.ralphIteration,
+          });
+          this.ralphPromise = null;
+          break;
+        }
+        if (this.ralphPromise) {
+          this.ralphIteration++;
+          if (this.ralphIteration >= this.ralphMaxIterations) {
+            this.opts.onEvent('lead', 'ralph_max_iterations', {
+              promise: this.ralphPromise, iteration: this.ralphIteration,
+            });
+            this.ralphPromise = null;
+            break;
+          }
+          this.opts.onEvent('lead', 'ralph_iteration', { iteration: this.ralphIteration });
+          this.conversation.push({
+            role: 'user',
+            content: `Continue working on the task. Previous turn did not include <promise>${this.ralphPromise}</promise>. Make additional concrete progress. Only emit <promise>${this.ralphPromise}</promise> when the task is genuinely complete.`,
+          });
+          continue;
+        }
         break;
       }
     }

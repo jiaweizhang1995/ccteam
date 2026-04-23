@@ -82,7 +82,12 @@ Rules for you (the agent):
     ctx.setCompletionPromise('<promise>DONE</promise>');
   }
 
-  // Feed the composed prompt to the agent for this turn.
+  // Activate the runtime loop on TeamLead so it auto-iterates until promise.
+  // When activateRalphLoop is not wired (e.g. exec mode), this is a no-op and
+  // the loop falls back to single-shot + state-file tracking.
+  ctx.activateRalphLoop?.('<promise>DONE</promise>', 20);
+
+  // Feed the composed prompt to the agent to kick off iteration 1.
   ctx.setPendingPrompt(`${state}\n\nContinue work on the task above.`);
 };
 

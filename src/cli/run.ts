@@ -142,6 +142,9 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
         setCompletionPromise: (promise: string) => {
           onLeadEventRef?.('lead', 'completion_promise_set', { promise });
         },
+        activateRalphLoop: (promise: string, maxIterations = 20) => {
+          lead.setRalphPromise(promise, maxIterations);
+        },
       }).catch((err: unknown) => {
         console.error('slash dispatch failed:', err instanceof Error ? err.message : String(err));
       });

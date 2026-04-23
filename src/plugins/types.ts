@@ -57,6 +57,11 @@ export interface PluginContext {
   setPendingPrompt(prompt: string): void;
   /** Register a completion-promise watcher (ralph-loop semantics) */
   setCompletionPromise?(promise: string): void;
+  /**
+   * Activate ralph-loop runtime on TeamLead (optional — only provided when
+   * a live lead is running, e.g. from the TUI driver in run.ts).
+   */
+  activateRalphLoop?(promise: string, maxIterations?: number): void;
 }
 
 export type BuiltinHandler = (ctx: PluginContext) => Promise<void>;
