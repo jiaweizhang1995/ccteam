@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { PlanState } from './types.js';
 
@@ -14,27 +14,38 @@ function clampAgents(n: number): number {
 }
 
 export function PlanPanel({ plan, termWidth, onConfirm, onCancel }: Props) {
+  // Ink's useInput registers the handler once (useEffect deps don't include the
+  // callback), causing stale closures over `plan`/`onConfirm`/`onCancel`. Use
+  // refs updated each render so the registered handler always sees latest state.
+  const planRef = useRef(plan);
+  const onConfirmRef = useRef(onConfirm);
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => { planRef.current = plan; });
+  useEffect(() => { onConfirmRef.current = onConfirm; });
+  useEffect(() => { onCancelRef.current = onCancel; });
+
   useInput((input, key) => {
-    if (!plan.awaitingConfirm) return;
+    const currentPlan = planRef.current;
+    if (!currentPlan.awaitingConfirm) return;
 
     if (key.escape) {
-      onCancel();
+      onCancelRef.current();
       return;
     }
 
     if (key.return) {
-      const suggested = plan.parsed?.suggestedAgents ?? null;
+      const suggested = currentPlan.parsed?.suggestedAgents ?? null;
       const count = suggested != null
         ? clampAgents(suggested)
-        : clampAgents(Math.min(plan.parsed?.steps.length ?? 3, 3));
-      onConfirm(count);
+        : clampAgents(Math.min(currentPlan.parsed?.steps.length ?? 3, 3));
+      onConfirmRef.current(count);
       return;
     }
 
     // 1-9 override
     const digit = parseInt(input, 10);
     if (!isNaN(digit) && digit >= 1 && digit <= 9) {
-      onConfirm(clampAgents(digit));
+      onConfirmRef.current(clampAgents(digit));
     }
   });
 
