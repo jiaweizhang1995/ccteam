@@ -1,0 +1,23 @@
+{
+  "providers": {
+    "openai-gpt5": {
+      "type": "openai-compat-sdk",
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "$OPENAI_API_KEY",
+      "model": "gpt-5"
+    }
+  },
+  "defaults": {
+    "lead": "openai-gpt5",
+    "teammate": "openai-gpt5"
+  },
+  "teammateMode": "auto",
+  "team": {
+    "size": 3
+  },
+  "hooks": {
+    "TeammateIdle": null,
+    "TaskCreated": null,
+    "TaskCompleted": null
+  }
+}

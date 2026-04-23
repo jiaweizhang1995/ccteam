@@ -1,0 +1,23 @@
+{
+  "providers": {
+    "ollama-qwen": {
+      "type": "openai-compat-sdk",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "ollama",
+      "model": "qwen2.5-coder:32b"
+    }
+  },
+  "defaults": {
+    "lead": "ollama-qwen",
+    "teammate": "ollama-qwen"
+  },
+  "teammateMode": "in-process",
+  "team": {
+    "size": 3
+  },
+  "hooks": {
+    "TeammateIdle": null,
+    "TaskCreated": null,
+    "TaskCompleted": null
+  }
+}

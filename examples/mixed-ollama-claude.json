@@ -1,0 +1,26 @@
+{
+  "providers": {
+    "claude-oauth": {
+      "type": "anthropic-oauth"
+    },
+    "ollama-qwen": {
+      "type": "openai-compat-sdk",
+      "baseUrl": "http://localhost:11434/v1",
+      "apiKey": "ollama",
+      "model": "qwen2.5-coder:32b"
+    }
+  },
+  "defaults": {
+    "lead": "claude-oauth",
+    "teammate": "ollama-qwen"
+  },
+  "teammateMode": "auto",
+  "team": {
+    "size": 3
+  },
+  "hooks": {
+    "TeammateIdle": null,
+    "TaskCreated": null,
+    "TaskCompleted": null
+  }
+}

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# agent-teams launcher.
+# Usage:
+#   ccteam "<prompt>" [--team <name>] [--lead <id>] [--teammate-provider <id>] [--debug]
+#   ccteam tui "<prompt>"                    # interactive Ink TUI
+#   ccteam list                              # list active teams
+#   ccteam cleanup <team>                    # force cleanup
+#   ccteam reset                             # nuke ~/.agent-teams state
+#
+# Reads config from ~/.agent-teams/config.json.
+# Auto-installs deps on first run.
+
+set -eo pipefail
+
+PROJECT_DIR="/Users/jimmymacmini/Desktop/ai-project/gsd-project/multi-agent-cli"
+cd "$PROJECT_DIR"
+
+# Ensure deps are installed
+if [ ! -d node_modules ]; then
+  echo "[ccteam] first-run install..."
+  pnpm install --frozen-lockfile
+fi
+
+# Ensure config exists
+if [ ! -f "$HOME/.agent-teams/config.json" ]; then
+  mkdir -p "$HOME/.agent-teams"
+  cat > "$HOME/.agent-teams/config.json" <<'EOF'
+{
+  "providers": {
+    "codex-hi-code": { "type": "codex-cli", "model": "gpt-5.4" },
+    "claude-cli":    { "type": "claude-cli", "model": "claude-opus-4-7" }
+  },
+  "defaults": {
+    "lead": "codex-hi-code",
+    "teammate": "codex-hi-code"
+  },
+  "teammateMode": "auto",
+  "hooks": {}
+}
+EOF
+  echo "[ccteam] seeded default config at ~/.agent-teams/config.json"
+fi
+
+# Subcommand dispatch
+case "${1:-}" in
+  tui|run)
+    shift
+    exec pnpm dev run "$@"
+    ;;
+  list|cleanup|attach|providers|config|auth)
+    exec pnpm dev "$@"
+    ;;
+  reset)
+    rm -f "$HOME/.agent-teams/state.db" "$HOME/.agent-teams/state.db-shm" "$HOME/.agent-teams/state.db-wal"
+    rm -rf "$HOME/.agent-teams/teams"
+    echo "[ccteam] reset state + teams dir"
+    exit 0
+    ;;
+  "")
+    echo "Usage: ccteam \"<prompt>\" [flags]"
+    echo "       ccteam tui \"<prompt>\""
+    echo "       ccteam list | cleanup <team> | reset"
+    exit 1
+    ;;
+  *)
+    # Default: non-interactive exec
+    exec pnpm dev exec "$@"
+    ;;
+esac

@@ -1,0 +1,23 @@
+{
+  "providers": {
+    "claude-oauth": {
+      "type": "anthropic-oauth"
+    },
+    "codex-cli": {
+      "type": "codex-cli"
+    }
+  },
+  "defaults": {
+    "lead": "claude-oauth",
+    "teammate": "codex-cli"
+  },
+  "teammateMode": "auto",
+  "team": {
+    "size": 3
+  },
+  "hooks": {
+    "TeammateIdle": null,
+    "TaskCreated": null,
+    "TaskCompleted": null
+  }
+}
