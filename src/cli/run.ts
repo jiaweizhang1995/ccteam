@@ -7,6 +7,8 @@ import { TeamLead } from '../orchestrator/lead.js';
 import { App } from '../tui/App.js';
 import { useTeamState } from '../tui/useTeamState.js';
 import type { FocusTarget, PlanState, PlanResult } from '../tui/types.js';
+import { bootstrapPlugins } from '../plugins/bootstrap.js';
+import { dispatchSlashCommand } from '../plugins/dispatcher.js';
 
 export interface RunOptions {
   lead?: string;
@@ -28,6 +30,7 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
   const dbPath = join(homedir(), '.agent-teams', 'state.db');
   const state = new State(dbPath);
   const teamName = opts.team ?? slugify(prompt || 'team');
+  const pluginRegistry = bootstrapPlugins(process.cwd());
 
   // Load initial roster and task list so TUI has something before the first notifier poll.
   const initialTeammates = state.listTeammates(teamName);
@@ -117,11 +120,40 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
       });
     };
 
+    const handleSlashCommand = (line: string) => {
+      dispatchSlashCommand(line, pluginRegistry, {
+        teamName,
+        cwd: process.cwd(),
+        emit: (kind: string, payload: Record<string, unknown>) => {
+          onLeadEventRef?.('lead', kind, payload);
+        },
+        setPendingPrompt: (prompt: string) => {
+          // Push as a user message to the lead via the state mailbox so it appears
+          // in the next turn naturally. Works for prompt-prepend + ralph-loop.
+          state.insertMessage({
+            team_name: teamName,
+            from_agent: 'user',
+            to_agent: 'lead',
+            kind: 'message',
+            body: JSON.stringify({ text: prompt }),
+            created_at: Date.now(),
+          });
+        },
+        setCompletionPromise: (promise: string) => {
+          onLeadEventRef?.('lead', 'completion_promise_set', { promise });
+        },
+      }).catch((err: unknown) => {
+        console.error('slash dispatch failed:', err instanceof Error ? err.message : String(err));
+      });
+    };
+
     return React.createElement(App, {
       initialState: appState,
       onSendMessage: handleSendMessage,
       onPlanRequest: handlePlanRequest,
       onPlanConfirm: handlePlanConfirm,
+      onSlashCommand: handleSlashCommand,
+      pluginRegistry,
       onSetPlanState: (setter) => { setPlanStateRef = setter; },
     });
   }

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Box, useStdout } from 'ink';
 import { LeadPane } from './LeadPane.js';
 import { TeammatePane } from './TeammatePane.js';
@@ -7,6 +7,7 @@ import { InputBar } from './InputBar.js';
 import { Keybinds } from './Keybinds.js';
 import { PlanPanel } from './PlanPanel.js';
 import type { AppState, FocusTarget, PlanState, PlanResult } from './types.js';
+import type { PluginRegistry } from '../plugins/registry.js';
 
 interface Props {
   initialState: AppState;
@@ -14,6 +15,10 @@ interface Props {
   onInterrupt?: (target: FocusTarget) => void;
   onPlanRequest?: (goal: string) => void;
   onPlanConfirm?: (plan: PlanResult, agentCount: number) => void;
+  /** Called when user submits a slash command that isn't the builtin /plan shortcut. */
+  onSlashCommand?: (line: string) => void;
+  /** Optional plugin registry — enables slash-command autocomplete dropdown. */
+  pluginRegistry?: PluginRegistry;
   // Called on every render with the current setPlanState so run.ts can stream deltas in.
   onSetPlanState?: (setter: (s: PlanState | ((prev: PlanState) => PlanState)) => void) => void;
 }
@@ -22,7 +27,7 @@ const TASK_PANEL_WIDTH = 36;
 
 const IDLE_PLAN: PlanState = { active: false, text: '', parsed: null, awaitingConfirm: false };
 
-export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, onPlanConfirm, onSetPlanState }: Props) {
+export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, onPlanConfirm, onSlashCommand, pluginRegistry, onSetPlanState }: Props) {
   const { teamName, leadEvents, teammates, tasks } = initialState;
 
   const [focus, setFocus] = useState<FocusTarget>(initialState.focus);
@@ -60,6 +65,7 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
       const trimmed = value.trim();
       if (!trimmed) return;
 
+      // /plan is a special-case builtin — TUI handles it directly for streaming UX.
       const planMatch = trimmed.match(/^\/plan\s+(.+)$/i);
       if (planMatch) {
         setInputValue('');
@@ -69,12 +75,25 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
         return;
       }
 
+      // Any other slash command — dispatch via plugin registry if configured.
+      if (trimmed.startsWith('/')) {
+        setInputValue('');
+        setInputActive(false);
+        onSlashCommand?.(trimmed);
+        return;
+      }
+
       onSendMessage?.(focus, trimmed);
       setInputValue('');
       setInputActive(false);
     },
-    [focus, onSendMessage, onPlanRequest],
+    [focus, onSendMessage, onPlanRequest, onSlashCommand],
   );
+
+  const slashMatches = useMemo(() => {
+    if (!pluginRegistry || !inputValue.startsWith('/')) return [];
+    return pluginRegistry.match(inputValue);
+  }, [pluginRegistry, inputValue]);
 
   const handlePlanConfirm = useCallback(
     (agentCount: number) => {
@@ -140,6 +159,7 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
         onChange={handleInputChange}
         onSubmit={handleInputSubmit}
         isActive={inputActive}
+        slashMatches={slashMatches}
       />
     </Box>
   );
