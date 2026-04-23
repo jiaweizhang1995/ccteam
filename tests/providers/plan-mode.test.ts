@@ -47,6 +47,12 @@ SUGGESTED_AGENTS: 3`;
     expect(result.suggestedAgents).toBe(1);
   });
 
+  it("rawText preserves original provider output", () => {
+    const text = "1. Step one — Do something.\nSUGGESTED_AGENTS: 1";
+    const result = parsePlanOutput(text);
+    expect(result.rawText).toBe(text);
+  });
+
   it("PLAN_MODE_SYSTEM_SUFFIX contains key sentinel text", () => {
     expect(PLAN_MODE_SYSTEM_SUFFIX).toContain("PLAN MODE");
     expect(PLAN_MODE_SYSTEM_SUFFIX).toContain("SUGGESTED_AGENTS");
