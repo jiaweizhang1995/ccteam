@@ -88,6 +88,13 @@ export async function spawnTeammate(
 
   child.on('exit', (code) => {
     state.updateTeammateStatus(agentId, 'shutdown');
+    state.appendEvent({
+      team_name: spec.teamName,
+      agent: spec.name,
+      kind: 'teammate_shutdown',
+      payload: JSON.stringify({ name: spec.name }),
+      created_at: Date.now(),
+    });
     process.stderr.write(`[${spec.name}] exited with code ${code ?? 'null'}\n`);
   });
 

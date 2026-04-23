@@ -164,6 +164,13 @@ async function agentLoop(): Promise<void> {
         conversation.push({ role: 'assistant', content: result.text });
       }
       state.updateTeammateStatus(agentId, 'idle');
+      state.appendEvent({
+        team_name: teamName,
+        agent: agentName,
+        kind: 'teammate_idle',
+        payload: JSON.stringify({ name: agentName, last_activity_ts: Date.now() }),
+        created_at: Date.now(),
+      });
       lastConversationLen = conversation.length;
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
     }
@@ -176,6 +183,13 @@ async function shutdown(): Promise<void> {
   await mcpCleanup();
   await backend.shutdown();
   state.updateTeammateStatus(agentId, 'shutdown');
+  state.appendEvent({
+    team_name: teamName,
+    agent: agentName,
+    kind: 'teammate_shutdown',
+    payload: JSON.stringify({ name: agentName }),
+    created_at: Date.now(),
+  });
   state.close();
   process.exit(0);
 }

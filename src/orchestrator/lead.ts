@@ -164,6 +164,14 @@ export class TeamLead {
               permissionMode,
             });
 
+            this.state.appendEvent({
+              team_name: this.opts.teamName,
+              agent: 'orchestrator',
+              kind: 'teammate_spawned',
+              payload: JSON.stringify({ name, id: spawned.id, provider: providerId, status: 'spawning' }),
+              created_at: Date.now(),
+            });
+
             this.state.insertMessage({
               team_name: this.opts.teamName,
               from_agent: 'orchestrator',
