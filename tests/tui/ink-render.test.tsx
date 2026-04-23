@@ -92,4 +92,47 @@ describe('App TUI', () => {
     expect(lastFrame()).toContain('idle');
     expect(lastFrame()).toContain('backend-dev');
   });
+
+  it('renders PlanPanel overlay when planState.active is true', () => {
+    const state = makeState({
+      planState: {
+        active: true,
+        text: 'Step 1: do something\nStep 2: do more',
+        parsed: null,
+        awaitingConfirm: false,
+      },
+    });
+    const { lastFrame } = render(<App initialState={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Plan Mode');
+    expect(frame).toContain('generating...');
+    expect(frame).toContain('Step 1: do something');
+  });
+
+  it('renders PlanPanel confirmation dialog when awaitingConfirm is true', () => {
+    const state = makeState({
+      planState: {
+        active: true,
+        text: 'Step 1: build api\nStep 2: write tests',
+        parsed: { steps: ['build api', 'write tests'], suggestedAgents: 2, rawText: 'Step 1: build api\nStep 2: write tests' },
+        awaitingConfirm: true,
+      },
+    });
+    const { lastFrame } = render(<App initialState={state} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Spawn');
+    expect(frame).toContain('agent');
+    expect(frame).toContain('Enter=yes');
+  });
+
+  it('shows teammate name in InputBar label when focused on a teammate', () => {
+    const state = makeState({
+      focus: 0,
+      teammates: [
+        { id: 'tm-1', name: 'alice', provider: 'stub', status: 'active', currentTaskId: null, recentEvents: [] },
+      ],
+    });
+    const { lastFrame } = render(<App initialState={state} />);
+    expect(lastFrame()).toContain('[alice]');
+  });
 });

@@ -6,7 +6,7 @@ import { State } from '../state/index.js';
 import { TeamLead } from '../orchestrator/lead.js';
 import { App } from '../tui/App.js';
 import { useTeamState } from '../tui/useTeamState.js';
-import type { FocusTarget } from '../tui/types.js';
+import type { FocusTarget, PlanState, PlanResult } from '../tui/types.js';
 
 export interface RunOptions {
   lead?: string;
@@ -34,8 +34,10 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
   const initialTasks = state.listTasks(teamName);
   const notifier = state.startNotifier(teamName);
 
-  // Ref lets the TeamLead callback reach into the live React state without closure capture.
+  // Refs let TeamLead callbacks reach into live React state without closure capture.
   let onLeadEventRef: ((agent: string, kind: string, payload: Record<string, unknown>) => void) | null = null;
+  // setPlanState from the live App component — updated on every render via LiveApp.
+  let setPlanStateRef: ((s: PlanState | ((prev: PlanState) => PlanState)) => void) | null = null;
 
   const lead = new TeamLead({
     teamName,
@@ -49,6 +51,9 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
     },
   });
 
+  // Abort controller for cancelling in-flight plan generation via Esc.
+  let planAbortController: AbortController | null = null;
+
   // Root component: wires live state hook and passes everything down to App.
   function LiveApp() {
     const { appState, onLeadEvent } = useTeamState({
@@ -58,8 +63,7 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
       notifier,
     });
 
-    // Keep the ref current on every render so TeamLead's onEvent always reaches
-    // the latest dispatch function.
+    // Keep refs current on every render.
     onLeadEventRef = onLeadEvent;
 
     const handleSendMessage = (target: FocusTarget, text: string) => {
@@ -78,9 +82,47 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
       });
     };
 
+    const handlePlanRequest = (goal: string) => {
+      planAbortController?.abort();
+      planAbortController = new AbortController();
+      const signal = planAbortController.signal;
+
+      lead.runPlanMode(
+        goal,
+        (delta: string) => {
+          setPlanStateRef?.((s) => ({ ...s, text: s.text + delta }));
+        },
+        signal,
+      ).then((result) => {
+        setPlanStateRef?.(() => ({
+          active: true,
+          text: result.rawText,
+          parsed: result,
+          awaitingConfirm: true,
+        }));
+      }).catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') {
+          // Esc cancelled — plan state already reset by handlePlanCancel in App
+          return;
+        }
+        setPlanStateRef?.(() => ({
+          active: false, text: '', parsed: null, awaitingConfirm: false,
+        }));
+      });
+    };
+
+    const handlePlanConfirm = (plan: PlanResult, agentCount: number) => {
+      lead.executeFromPlan(plan, agentCount).catch((err: unknown) => {
+        console.error('executeFromPlan failed:', err instanceof Error ? err.message : String(err));
+      });
+    };
+
     return React.createElement(App, {
       initialState: appState,
       onSendMessage: handleSendMessage,
+      onPlanRequest: handlePlanRequest,
+      onPlanConfirm: handlePlanConfirm,
+      onSetPlanState: (setter) => { setPlanStateRef = setter; },
     });
   }
 
