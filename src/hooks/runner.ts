@@ -50,7 +50,9 @@ export async function runHook(
       resolve({ allowed: true, exitCode: 1 }); // hook launch failure → allow
     });
 
+    // Swallow EPIPE — child may exit before we finish writing (common for `exit 2` hooks).
+    child.stdin?.on('error', () => { /* ignore EPIPE */ });
     const input = JSON.stringify(payload);
-    child.stdin?.write(input, () => child.stdin?.end());
+    child.stdin?.write(input, () => { try { child.stdin?.end(); } catch { /* already closed */ } });
   });
 }
