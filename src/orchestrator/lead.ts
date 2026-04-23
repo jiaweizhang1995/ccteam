@@ -281,6 +281,11 @@ export class TeamLead {
             promise: this.ralphPromise,
             iteration: this.ralphIteration,
           });
+          this.state.appendEvent({
+            team_name: this.opts.teamName, agent: 'lead', kind: 'ralph_completed',
+            payload: JSON.stringify({ promise: this.ralphPromise, iteration: this.ralphIteration }),
+            created_at: Date.now(),
+          });
           this.ralphPromise = null;
           break;
         }
@@ -294,6 +299,11 @@ export class TeamLead {
             break;
           }
           this.opts.onEvent('lead', 'ralph_iteration', { iteration: this.ralphIteration });
+          this.state.appendEvent({
+            team_name: this.opts.teamName, agent: 'lead', kind: 'ralph_iteration',
+            payload: JSON.stringify({ iteration: this.ralphIteration }),
+            created_at: Date.now(),
+          });
           // Inject continue-prompt and keep looping
           this.conversation.push({
             role: 'user',
@@ -361,6 +371,11 @@ export class TeamLead {
             break;
           }
           this.opts.onEvent('lead', 'ralph_iteration', { iteration: this.ralphIteration });
+          this.state.appendEvent({
+            team_name: this.opts.teamName, agent: 'lead', kind: 'ralph_iteration',
+            payload: JSON.stringify({ iteration: this.ralphIteration }),
+            created_at: Date.now(),
+          });
           this.conversation.push({
             role: 'user',
             content: `Continue working on the task. Previous turn did not include <promise>${this.ralphPromise}</promise>. Make additional concrete progress. Only emit <promise>${this.ralphPromise}</promise> when the task is genuinely complete.`,
