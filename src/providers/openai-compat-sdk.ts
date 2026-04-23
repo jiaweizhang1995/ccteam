@@ -7,6 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { toolSpecsToOpenAI } from "./tools.js";
+import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface OpenAICompatConfig {
   apiKey: string;
@@ -132,16 +133,21 @@ export class OpenAICompatBackend implements AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    planMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, tools, signal, onEvent } = opts;
-    const openaiTools = toolSpecsToOpenAI(tools);
+    const { systemPrompt, messages, tools, signal, onEvent, planMode } = opts;
+    const effectiveTools = planMode ? [] : tools;
+    const effectiveSystem = planMode
+      ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
+      : systemPrompt;
+    const openaiTools = toolSpecsToOpenAI(effectiveTools);
 
     let resultText = "";
     let stopReason = "stop";
     const toolCalls: AgentTurnResult["tool_calls"] = [];
 
     const apiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: effectiveSystem },
       ...expandMessages(messages),
     ];
 

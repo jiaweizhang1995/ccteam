@@ -91,6 +91,7 @@ export interface AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    planMode?: boolean;
   }): Promise<AgentTurnResult>;
 
   shutdown(): Promise<void>;

@@ -7,6 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { toolSpecsToAnthropic } from "./tools.js";
+import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface AnthropicSdkConfig {
   apiKey?: string;
@@ -44,9 +45,14 @@ export class AnthropicSdkBackend implements AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    planMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, tools, signal, onEvent } = opts;
-    const anthropicTools = toolSpecsToAnthropic(tools);
+    const { systemPrompt, messages, tools, signal, onEvent, planMode } = opts;
+    const effectiveTools = planMode ? [] : tools;
+    const effectiveSystem = planMode
+      ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
+      : systemPrompt;
+    const anthropicTools = toolSpecsToAnthropic(effectiveTools);
 
     let resultText = "";
     let stopReason = "end_turn";
@@ -56,7 +62,7 @@ export class AnthropicSdkBackend implements AgentBackend {
       const stream = this.client.messages.stream({
         model: this.model,
         max_tokens: this.maxTokens,
-        system: systemPrompt,
+        system: effectiveSystem,
         messages: messages as Anthropic.MessageParam[],
         tools: anthropicTools as Anthropic.Tool[],
       });

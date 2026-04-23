@@ -45,8 +45,9 @@ export class ClaudeCliBackend implements AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    planMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, signal, onEvent } = opts;
+    const { systemPrompt, messages, signal, onEvent, planMode } = opts;
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     const prompt = lastUserMsg
@@ -64,6 +65,7 @@ export class ClaudeCliBackend implements AgentBackend {
     if (systemPrompt) args.push("--system-prompt", systemPrompt);
     if (this.model) args.push("--model", this.model);
     if (this.mcpConfigPath) args.push("--mcp-config", this.mcpConfigPath);
+    if (planMode) args.push("--permission-mode", "plan");
 
     return new Promise((resolve, reject) => {
       const proc = spawn(this.cliBin, args, {

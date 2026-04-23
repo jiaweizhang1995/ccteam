@@ -7,6 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { parseCodexLine } from "./codex-cli-parser.js";
+import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface CodexCliConfig {
   cliBin?: string; // default: "codex"
@@ -41,8 +42,9 @@ export class CodexCliBackend implements AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    planMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, signal, onEvent } = opts;
+    const { systemPrompt, messages, signal, onEvent, planMode } = opts;
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     const prompt = lastUserMsg
@@ -54,14 +56,27 @@ export class CodexCliBackend implements AgentBackend {
             .join("")
       : "";
 
-    // --dangerously-bypass-approvals-and-sandbox equivalent of the `codex --yolo` shell
-    // alias — required so codex's tool layer doesn't silently cancel MCP calls when
-    // spawned as a subprocess (no TTY, no interactive approval path).
-    const args = ["exec", "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox"];
+    const args = ["exec", "--json", "--skip-git-repo-check"];
+    // In plan mode, skip the sandbox bypass — no tool execution expected
+    if (!planMode) {
+      // --dangerously-bypass-approvals-and-sandbox equivalent of the `codex --yolo` shell
+      // alias — required so codex's tool layer doesn't silently cancel MCP calls when
+      // spawned as a subprocess (no TTY, no interactive approval path).
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    }
+    if (planMode) {
+      args.push("-c", 'model_reasoning_effort="high"');
+    }
+
+    // In plan mode, append the plan-mode sentinel to the system prompt
+    const effectiveSystem = planMode
+      ? (systemPrompt ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX : PLAN_MODE_SYSTEM_SUFFIX.trimStart())
+      : systemPrompt;
+
     // codex has no --instructions flag; system prompt is appended to the user prompt
     // via a clearly-delimited block so the model can distinguish it
-    const fullPrompt = systemPrompt
-      ? `${prompt}\n\n<system>\n${systemPrompt}\n</system>`
+    const fullPrompt = effectiveSystem
+      ? `${prompt}\n\n<system>\n${effectiveSystem}\n</system>`
       : prompt;
     // MCP overrides first (before positional prompt) so codex sees them as flags.
     args.splice(args.length, 0, ...this.mcpOverrides);
