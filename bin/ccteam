@@ -12,7 +12,7 @@
 
 set -eo pipefail
 
-PROJECT_DIR="/Users/jimmymacmini/Desktop/ai-project/gsd-project/multi-agent-cli"
+PROJECT_DIR="/Users/jimmymacmini/Desktop/claude-code-project/ccteam"
 cd "$PROJECT_DIR"
 
 # Ensure deps are installed
