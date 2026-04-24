@@ -6,7 +6,7 @@ import { State } from '../state/index.js';
 import { TeamLead } from '../orchestrator/lead.js';
 import { App } from '../tui/App.js';
 import { useTeamState } from '../tui/useTeamState.js';
-import type { FocusTarget, PlanState, PlanResult } from '../tui/types.js';
+import type { FocusTarget, PlanState, PlanResult, BrainstormState } from '../tui/types.js';
 import { bootstrapPlugins } from '../plugins/bootstrap.js';
 import { dispatchSlashCommand } from '../plugins/dispatcher.js';
 
@@ -41,6 +41,8 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
   let onLeadEventRef: ((agent: string, kind: string, payload: Record<string, unknown>) => void) | null = null;
   // setPlanState from the live App component — updated on every render via LiveApp.
   let setPlanStateRef: ((s: PlanState | ((prev: PlanState) => PlanState)) => void) | null = null;
+  // setBrainstormState from the live App component — updated on every render.
+  let setBrainstormStateRef: ((s: BrainstormState | ((prev: BrainstormState) => BrainstormState)) => void) | null = null;
 
   const lead = new TeamLead({
     teamName,
@@ -56,6 +58,43 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
 
   // Abort controller for cancelling in-flight plan generation via Esc.
   let planAbortController: AbortController | null = null;
+  // Separate abort controller for the multi-turn brainstorm stream.
+  let brainstormAbortController: AbortController | null = null;
+
+  /**
+   * Stream lead's brainstorm output to both the TUI event log (so the user
+   * sees it in the main chat pane) AND aggregate into brainstormState.latest
+   * on completion. Shared by startBrainstorm + continueBrainstorm handlers.
+   */
+  const streamBrainstormTurn = (
+    run: (onDelta: (chunk: string) => void, signal: AbortSignal) => Promise<PlanResult>,
+  ): void => {
+    brainstormAbortController?.abort();
+    brainstormAbortController = new AbortController();
+    const signal = brainstormAbortController.signal;
+
+    setBrainstormStateRef?.((s) => ({ ...s, streaming: true }));
+
+    run((delta) => {
+      // Mirror the text stream into the main lead chat pane so the
+      // conversation reads naturally in the TUI.
+      onLeadEventRef?.('lead', 'text_delta', { text: delta });
+    }, signal).then((result) => {
+      setBrainstormStateRef?.(() => ({
+        active: true,
+        streaming: false,
+        latest: result,
+      }));
+      onLeadEventRef?.('lead', 'brainstorm_turn_completed', {
+        steps: result.steps.length,
+        suggestedAgents: result.suggestedAgents,
+      });
+    }).catch((err: unknown) => {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      onLeadEventRef?.('lead', 'error', { message: err instanceof Error ? err.message : String(err) });
+      setBrainstormStateRef?.((s) => ({ ...s, streaming: false }));
+    });
+  };
 
   // Root component: wires live state hook and passes everything down to App.
   function LiveApp() {
@@ -70,6 +109,15 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
     onLeadEventRef = onLeadEvent;
 
     const handleSendMessage = (target: FocusTarget, text: string) => {
+      // When brainstorm is active, any plain-text message from the user is
+      // a plan refinement — route it to lead.continueBrainstorm rather than
+      // the teammate mailbox.
+      if (lead.isBrainstormActive() && target === 'lead') {
+        onLeadEventRef?.('user', 'text', { text });
+        streamBrainstormTurn((onDelta, signal) => lead.continueBrainstorm(text, onDelta, signal));
+        return;
+      }
+
       const toAgent =
         target === 'lead'
           ? null
@@ -145,6 +193,41 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
         activateRalphLoop: (promise: string, maxIterations = 20) => {
           lead.setRalphPromise(promise, maxIterations);
         },
+        startBrainstorm: (goal: string) => {
+          setBrainstormStateRef?.(() => ({ active: true, streaming: true, latest: null }));
+          onLeadEventRef?.('user', 'text', { text: `/brainstorm ${goal}` });
+          streamBrainstormTurn((onDelta, signal) => lead.startBrainstorm(goal, onDelta, signal));
+        },
+        executeBrainstormPlan: () => {
+          if (!lead.isBrainstormActive()) {
+            onLeadEventRef?.('lead', 'plugin_output', {
+              stream: 'stdout',
+              text: '[/go] no active brainstorm; use /brainstorm <goal> first.',
+            });
+            return;
+          }
+          if (!lead.getBrainstormLatest()) {
+            onLeadEventRef?.('lead', 'plugin_output', {
+              stream: 'stdout',
+              text: '[/go] brainstorm has no plan yet — send at least one message first.',
+            });
+            return;
+          }
+          brainstormAbortController?.abort();
+          lead.commitBrainstorm().then(() => {
+            setBrainstormStateRef?.(() => ({ active: false, streaming: false, latest: null }));
+          }).catch((err: unknown) => {
+            onLeadEventRef?.('lead', 'error', {
+              message: `commit failed: ${err instanceof Error ? err.message : String(err)}`,
+            });
+            setBrainstormStateRef?.((s) => ({ ...s, streaming: false }));
+          });
+        },
+        exitBrainstorm: () => {
+          brainstormAbortController?.abort();
+          lead.exitBrainstorm();
+          setBrainstormStateRef?.(() => ({ active: false, streaming: false, latest: null }));
+        },
       }).catch((err: unknown) => {
         console.error('slash dispatch failed:', err instanceof Error ? err.message : String(err));
       });
@@ -158,6 +241,7 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
       onSlashCommand: handleSlashCommand,
       pluginRegistry,
       onSetPlanState: (setter) => { setPlanStateRef = setter; },
+      onSetBrainstormState: (setter) => { setBrainstormStateRef = setter; },
     });
   }
 
@@ -172,12 +256,18 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
   process.once('SIGINT', () => void shutdown().then(() => process.exit(0)));
   process.once('SIGTERM', () => void shutdown().then(() => process.exit(0)));
 
-  // Run lead in background; TUI stays live until Ctrl+C or lead finishes.
-  lead.run().then(() => shutdown()).then(() => unmount()).catch(async (err: unknown) => {
-    await shutdown();
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
+  // Run the initial lead turn in background. Previously we called shutdown()
+  // the moment lead.run() returned, which killed the TUI after a single-shot
+  // CLI-subprocess turn — making interactive chat, /brainstorm, and /plan
+  // (which need the TUI alive beyond that first turn) unreachable for those
+  // provider types. Now we let lead.run() finish quietly and keep the TUI
+  // alive until the user exits via SIGINT/SIGTERM or Ink's own exit signals.
+  lead.run().catch(async (err: unknown) => {
+    onLeadEventRef?.('lead', 'error', {
+      message: err instanceof Error ? err.message : String(err),
+    });
   });
 
   await waitUntilExit();
+  await shutdown();
 }

@@ -51,6 +51,21 @@ export class TeamLead {
   private ralphIteration = 0;
   private ralphMaxIterations = 20;
 
+  /**
+   * Brainstorm (multi-turn plan-refinement) mode.
+   *
+   * Independent of the main `run()` conversation: each brainstorm turn is a
+   * fresh `backend.run({planMode: true})` call whose messages live in
+   * `brainstormConversation`. After `/go`, `brainstormLatest` is handed to
+   * `executeFromPlan` and the state is cleared.
+   *
+   * Kept separate from `this.conversation` so committing or abandoning a
+   * brainstorm does not pollute the main agent's context.
+   */
+  private brainstormActive = false;
+  private brainstormConversation: ChatMessage[] = [];
+  private brainstormLatest: PlanResult | null = null;
+
   constructor(opts: TeamLeadOpts) {
     this.opts = opts;
   }
@@ -442,6 +457,169 @@ export class TeamLead {
       agent: 'lead',
       kind: 'plan_completed',
       payload: JSON.stringify({ steps: planResult.steps, suggestedAgents: planResult.suggestedAgents }),
+      created_at: Date.now(),
+    });
+
+    return planResult;
+  }
+
+  /** Is the lead currently in multi-turn brainstorm mode? */
+  isBrainstormActive(): boolean {
+    return this.brainstormActive;
+  }
+
+  /** The latest parsed plan produced during brainstorm — what `/go` will execute. */
+  getBrainstormLatest(): PlanResult | null {
+    return this.brainstormLatest;
+  }
+
+  /**
+   * Start a brainstorm (multi-turn plan-refinement) session. Seeds the
+   * conversation with the initial goal, runs one plan-mode turn, and stores
+   * the assistant output. Subsequent refinements go through
+   * `continueBrainstorm`.
+   *
+   * Does not touch `this.conversation` — completely isolated from the main
+   * agent loop, so aborting brainstorm never pollutes normal execution.
+   */
+  async startBrainstorm(
+    goal: string,
+    onStream: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<PlanResult> {
+    if (this.brainstormActive) {
+      // Starting a new brainstorm implicitly abandons the prior one.
+      this.brainstormActive = false;
+      this.brainstormConversation = [];
+      this.brainstormLatest = null;
+    }
+    this.brainstormActive = true;
+    this.brainstormConversation = [{ role: 'user', content: goal }];
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'brainstorm_started',
+      payload: JSON.stringify({ goal }),
+      created_at: Date.now(),
+    });
+    return this._runBrainstormTurn(onStream, signal);
+  }
+
+  /**
+   * Append a user message to an ongoing brainstorm session and run another
+   * plan-mode turn. The assistant's streamed response is pushed onto the
+   * brainstorm conversation.
+   */
+  async continueBrainstorm(
+    userMessage: string,
+    onStream: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<PlanResult> {
+    if (!this.brainstormActive) {
+      throw new Error('continueBrainstorm called but brainstorm is not active');
+    }
+    this.brainstormConversation.push({ role: 'user', content: userMessage });
+    return this._runBrainstormTurn(onStream, signal);
+  }
+
+  /**
+   * Abort the current brainstorm without executing. Clears state but does
+   * not spawn teammates or touch the main agent loop.
+   */
+  exitBrainstorm(): void {
+    if (!this.brainstormActive) return;
+    this.brainstormActive = false;
+    this.brainstormConversation = [];
+    this.brainstormLatest = null;
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'brainstorm_exited',
+      payload: '{}',
+      created_at: Date.now(),
+    });
+  }
+
+  /**
+   * Execute the latest brainstorm plan. Clears brainstorm state, then
+   * delegates to the existing `executeFromPlan` path.
+   *
+   * Throws if no plan has been produced yet (user hit `/go` before any
+   * plan-mode turn completed).
+   */
+  async commitBrainstorm(agentCount?: number): Promise<PlanResult> {
+    if (!this.brainstormActive) {
+      throw new Error('commitBrainstorm called but brainstorm is not active');
+    }
+    const plan = this.brainstormLatest;
+    if (!plan) {
+      throw new Error('commitBrainstorm called but no plan has been generated yet');
+    }
+    const count = agentCount ?? Math.min(plan.suggestedAgents ?? plan.steps.length ?? 1, 5);
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'brainstorm_committed',
+      payload: JSON.stringify({ steps: plan.steps.length, agentCount: count }),
+      created_at: Date.now(),
+    });
+    // Clear brainstorm state BEFORE executing so if executeFromPlan fails the
+    // user can start a fresh brainstorm without residual state.
+    this.brainstormActive = false;
+    this.brainstormConversation = [];
+    this.brainstormLatest = null;
+    await this.executeFromPlan(plan, Math.max(1, Math.min(5, count)));
+    return plan;
+  }
+
+  /**
+   * Internal: run one brainstorm turn against the current conversation.
+   * Shared by startBrainstorm + continueBrainstorm.
+   */
+  private async _runBrainstormTurn(
+    onStream: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<PlanResult> {
+    const effectiveSignal = signal ?? new AbortController().signal;
+    let rawText = '';
+
+    const result = await this.backend.run({
+      systemPrompt: `You are the team lead for team "${this.opts.teamName}". You are in multi-turn planning mode — propose and refine a plan in response to the user. Tools are disabled until the user commits the plan with /go.`,
+      messages: this.brainstormConversation,
+      tools: [],
+      signal: effectiveSignal,
+      onEvent: (e: AgentEvent) => {
+        if (e.type === 'text_delta') {
+          rawText += e.text;
+          onStream(e.text);
+        }
+      },
+      planMode: true,
+    });
+
+    if (result.error) {
+      throw Object.assign(new Error(result.error), { name: 'Error' });
+    }
+    if (effectiveSignal.aborted) {
+      throw Object.assign(new Error('Brainstorm turn aborted'), { name: 'AbortError' });
+    }
+
+    const fullText = rawText || result.text;
+    this.brainstormConversation.push({ role: 'assistant', content: fullText });
+
+    const parsed = parsePlanOutput(fullText);
+    const planResult: PlanResult = {
+      steps: parsed.steps,
+      suggestedAgents: parsed.suggestedAgents,
+      rawText: fullText,
+    };
+    this.brainstormLatest = planResult;
+
+    this.state.appendEvent({
+      team_name: this.opts.teamName,
+      agent: 'lead',
+      kind: 'brainstorm_turn_completed',
+      payload: JSON.stringify({ steps: planResult.steps.length, suggestedAgents: planResult.suggestedAgents, turnCount: this.brainstormConversation.length / 2 }),
       created_at: Date.now(),
     });
 

@@ -15,6 +15,25 @@ export interface PlanState {
   awaitingConfirm: boolean;
 }
 
+/**
+ * Multi-turn plan-refinement mode (a.k.a. brainstorm).
+ *
+ * Semantics:
+ * - `active=true` from the moment `/brainstorm <goal>` runs until `/go` or
+ *   `/cancel` is invoked.
+ * - While active, tools are disabled (planMode on the backend) and normal
+ *   user messages in the TUI input are routed to `lead.continueBrainstorm`
+ *   instead of the usual `insertMessage` mailbox path.
+ * - `latest` always holds the most recent parsed plan returned by the
+ *   backend; `/go` reads from here to seed `executeFromPlan`.
+ * - `streaming` is true while a plan-mode turn is mid-flight.
+ */
+export interface BrainstormState {
+  active: boolean;
+  streaming: boolean;
+  latest: PlanResult | null;
+}
+
 export interface TeammateState {
   id: string;
   name: string;
@@ -50,4 +69,5 @@ export interface AppState {
   showTaskList: boolean;
   inputValue: string;
   planState?: PlanState;
+  brainstormState?: BrainstormState;
 }

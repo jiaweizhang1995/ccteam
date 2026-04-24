@@ -62,6 +62,23 @@ export interface PluginContext {
    * Only provided when a live lead is running (e.g. TUI driver in run.ts).
    */
   activateRalphLoop?(promise: string | null, maxIterations?: number): void;
+  /**
+   * Start a brainstorm (multi-turn plan-mode) session. The driver will
+   * subsequently route user messages into lead.continueBrainstorm until /go
+   * or /cancel. Only provided by the TUI driver (run.ts).
+   */
+  startBrainstorm?(goal: string): void;
+  /**
+   * Commit the current brainstorm plan: parse the latest assistant output
+   * into a PlanResult, exit brainstorm state, spawn teammates and execute.
+   * Only provided by the TUI driver (run.ts).
+   */
+  executeBrainstormPlan?(): void;
+  /**
+   * Abort the current brainstorm without executing. Only provided by the
+   * TUI driver (run.ts).
+   */
+  exitBrainstorm?(): void;
 }
 
 export type BuiltinHandler = (ctx: PluginContext) => Promise<void>;

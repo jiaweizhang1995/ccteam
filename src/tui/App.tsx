@@ -1,12 +1,12 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Box, useStdout } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { LeadPane } from './LeadPane.js';
 import { TeammatePane } from './TeammatePane.js';
 import { TaskListPanel } from './TaskListPanel.js';
 import { InputBar } from './InputBar.js';
 import { Keybinds } from './Keybinds.js';
 import { PlanPanel } from './PlanPanel.js';
-import type { AppState, FocusTarget, PlanState, PlanResult } from './types.js';
+import type { AppState, FocusTarget, PlanState, PlanResult, BrainstormState } from './types.js';
 import type { PluginRegistry } from '../plugins/registry.js';
 
 interface Props {
@@ -21,13 +21,16 @@ interface Props {
   pluginRegistry?: PluginRegistry;
   // Called on every render with the current setPlanState so run.ts can stream deltas in.
   onSetPlanState?: (setter: (s: PlanState | ((prev: PlanState) => PlanState)) => void) => void;
+  // Same pattern for brainstormState (multi-turn /brainstorm + /go flow).
+  onSetBrainstormState?: (setter: (s: BrainstormState | ((prev: BrainstormState) => BrainstormState)) => void) => void;
 }
 
 const TASK_PANEL_WIDTH = 36;
 
 const IDLE_PLAN: PlanState = { active: false, text: '', parsed: null, awaitingConfirm: false };
+const IDLE_BRAINSTORM: BrainstormState = { active: false, streaming: false, latest: null };
 
-export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, onPlanConfirm, onSlashCommand, pluginRegistry, onSetPlanState }: Props) {
+export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, onPlanConfirm, onSlashCommand, pluginRegistry, onSetPlanState, onSetBrainstormState }: Props) {
   const { teamName, leadEvents, teammates, tasks } = initialState;
 
   const [focus, setFocus] = useState<FocusTarget>(initialState.focus);
@@ -35,9 +38,11 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
   const [inputValue, setInputValue] = useState(initialState.inputValue);
   const [inputActive, setInputActive] = useState(false);
   const [planState, setPlanState] = useState<PlanState>(initialState.planState ?? IDLE_PLAN);
+  const [brainstormState, setBrainstormState] = useState<BrainstormState>(initialState.brainstormState ?? IDLE_BRAINSTORM);
 
-  // Keep the external ref current so run.ts can push streaming deltas into planState.
+  // Keep the external refs current so run.ts can push streaming deltas in.
   onSetPlanState?.(setPlanState as (s: PlanState | ((prev: PlanState) => PlanState)) => void);
+  onSetBrainstormState?.(setBrainstormState as (s: BrainstormState | ((prev: BrainstormState) => BrainstormState)) => void);
 
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 120;
@@ -121,6 +126,29 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
 
   return (
     <Box flexDirection="column" width={termWidth}>
+      {brainstormState.active && (
+        <Box
+          borderStyle="single"
+          borderColor="magenta"
+          paddingX={1}
+          flexDirection="column"
+        >
+          <Box>
+            <Text bold color="magenta">🧠 brainstorming </Text>
+            {brainstormState.streaming && <Text color="yellow">… thinking</Text>}
+            {!brainstormState.streaming && brainstormState.latest && (
+              <Text color="gray">
+                — plan has {brainstormState.latest.steps.length} step{brainstormState.latest.steps.length === 1 ? '' : 's'}
+                {brainstormState.latest.suggestedAgents != null && `, suggests ${brainstormState.latest.suggestedAgents} agent${brainstormState.latest.suggestedAgents === 1 ? '' : 's'}`}
+              </Text>
+            )}
+          </Box>
+          <Text color="gray" dimColor>
+            send messages to refine · /go to execute · /cancel to abort
+          </Text>
+        </Box>
+      )}
+
       <Keybinds
         focus={focus}
         teammateCount={teammates.length}
