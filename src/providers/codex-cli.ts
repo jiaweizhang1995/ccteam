@@ -7,7 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { parseCodexLine } from "./codex-cli-parser.js";
-import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
+import { PLAN_MODE_SYSTEM_SUFFIX, BRAINSTORM_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface CodexCliConfig {
   cliBin?: string; // default: "codex"
@@ -43,8 +43,9 @@ export class CodexCliBackend implements AgentBackend {
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
     planMode?: boolean;
+    brainstormMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, signal, onEvent, planMode } = opts;
+    const { systemPrompt, messages, signal, onEvent, planMode, brainstormMode } = opts;
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     const prompt = lastUserMsg
@@ -56,22 +57,26 @@ export class CodexCliBackend implements AgentBackend {
             .join("")
       : "";
 
+    // brainstormMode needs tool access for read-only investigation, so we
+    // keep the sandbox bypass. planMode (strict "no tools at all") explicitly
+    // drops it.
     const args = ["exec", "--json", "--skip-git-repo-check"];
-    // In plan mode, skip the sandbox bypass — no tool execution expected
-    if (!planMode) {
+    if (!planMode || brainstormMode) {
       // --dangerously-bypass-approvals-and-sandbox equivalent of the `codex --yolo` shell
       // alias — required so codex's tool layer doesn't silently cancel MCP calls when
       // spawned as a subprocess (no TTY, no interactive approval path).
       args.push("--dangerously-bypass-approvals-and-sandbox");
     }
-    if (planMode) {
+    if (planMode || brainstormMode) {
       args.push("-c", 'model_reasoning_effort="high"');
     }
 
-    // In plan mode, append the plan-mode sentinel to the system prompt
-    const effectiveSystem = planMode
-      ? (systemPrompt ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX : PLAN_MODE_SYSTEM_SUFFIX.trimStart())
-      : systemPrompt;
+    // brainstormMode wins over planMode if both are set (see types.ts).
+    const effectiveSystem = brainstormMode
+      ? (systemPrompt ? systemPrompt + BRAINSTORM_MODE_SYSTEM_SUFFIX : BRAINSTORM_MODE_SYSTEM_SUFFIX.trimStart())
+      : planMode
+        ? (systemPrompt ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX : PLAN_MODE_SYSTEM_SUFFIX.trimStart())
+        : systemPrompt;
 
     // codex has no --instructions flag; system prompt is appended to the user prompt
     // via a clearly-delimited block so the model can distinguish it

@@ -7,7 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { toolSpecsToAnthropic } from "./tools.js";
-import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
+import { PLAN_MODE_SYSTEM_SUFFIX, BRAINSTORM_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface AnthropicSdkConfig {
   apiKey?: string;
@@ -46,12 +46,20 @@ export class AnthropicSdkBackend implements AgentBackend {
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
     planMode?: boolean;
+    brainstormMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, tools, signal, onEvent, planMode } = opts;
-    const effectiveTools = planMode ? [] : tools;
-    const effectiveSystem = planMode
-      ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
-      : systemPrompt;
+    const { systemPrompt, messages, tools, signal, onEvent, planMode, brainstormMode } = opts;
+    // Both modes drop tools for SDK providers — we don't have granular
+    // read-only tool filtering yet, so brainstorm relies entirely on the
+    // prompt-level restriction (no writes) even though it can't actually
+    // read files via the SDK path either. CLI-subprocess backends are
+    // where brainstorm really shines.
+    const effectiveTools = (planMode || brainstormMode) ? [] : tools;
+    const effectiveSystem = brainstormMode
+      ? systemPrompt + BRAINSTORM_MODE_SYSTEM_SUFFIX
+      : planMode
+        ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
+        : systemPrompt;
     const anthropicTools = toolSpecsToAnthropic(effectiveTools);
 
     let resultText = "";

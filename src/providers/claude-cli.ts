@@ -46,8 +46,9 @@ export class ClaudeCliBackend implements AgentBackend {
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
     planMode?: boolean;
+    brainstormMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, signal, onEvent, planMode } = opts;
+    const { systemPrompt, messages, signal, onEvent, planMode, brainstormMode } = opts;
 
     const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
     const prompt = lastUserMsg
@@ -65,7 +66,10 @@ export class ClaudeCliBackend implements AgentBackend {
     if (systemPrompt) args.push("--system-prompt", systemPrompt);
     if (this.model) args.push("--model", this.model);
     if (this.mcpConfigPath) args.push("--mcp-config", this.mcpConfigPath);
-    if (planMode) args.push("--permission-mode", "plan");
+    // For brainstormMode we also use claude's native plan permission-mode:
+    // it allows read tools (good for research) and blocks write tools
+    // (hard enforcement of the "no writes until /go" rule).
+    if (planMode || brainstormMode) args.push("--permission-mode", "plan");
 
     return new Promise((resolve, reject) => {
       const proc = spawn(this.cliBin, args, {

@@ -575,6 +575,18 @@ export class TeamLead {
   /**
    * Internal: run one brainstorm turn against the current conversation.
    * Shared by startBrainstorm + continueBrainstorm.
+   *
+   * Uses `brainstormMode: true` (not `planMode`) so the provider appends
+   * BRAINSTORM_MODE_SYSTEM_SUFFIX — which ENCOURAGES read-only research
+   * tools (files, grep, git log, web) instead of forbidding all tools like
+   * PLAN_MODE does. The richer output format (Context + Plan with
+   * multi-line steps + Risks + SUGGESTED_AGENTS) is also defined in that
+   * suffix; see src/providers/plan-mode.ts.
+   *
+   * Why two modes: `/plan` (short one-shot outline) and `/brainstorm`
+   * (multi-turn research-backed plan) serve different jobs. Sharing the
+   * old PLAN_MODE produced shallow-bullet brainstorm output that made
+   * the feature much less useful than Claude Code's native plan mode.
    */
   private async _runBrainstormTurn(
     onStream: (chunk: string) => void,
@@ -584,7 +596,7 @@ export class TeamLead {
     let rawText = '';
 
     const result = await this.backend.run({
-      systemPrompt: `You are the team lead for team "${this.opts.teamName}". You are in multi-turn planning mode — propose and refine a plan in response to the user. Tools are disabled until the user commits the plan with /go.`,
+      systemPrompt: `You are the team lead for team "${this.opts.teamName}" working inside the user's project directory. The user is in a multi-turn brainstorm with you to refine an implementation plan they will commit with /go. Investigate the repo before proposing.`,
       messages: this.brainstormConversation,
       tools: [],
       signal: effectiveSignal,
@@ -594,7 +606,7 @@ export class TeamLead {
           onStream(e.text);
         }
       },
-      planMode: true,
+      brainstormMode: true,
     });
 
     if (result.error) {

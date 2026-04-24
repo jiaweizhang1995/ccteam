@@ -91,7 +91,21 @@ export interface AgentBackend {
     tools: ToolSpec[];
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
+    /**
+     * Short-outline plan mode (used by /plan): appends PLAN_MODE_SYSTEM_SUFFIX
+     * which forbids tool use entirely and demands a 2-6 step outline.
+     */
     planMode?: boolean;
+    /**
+     * Multi-turn research-backed plan mode (used by /brainstorm): appends
+     * BRAINSTORM_MODE_SYSTEM_SUFFIX which allows read-only research tools
+     * and demands a richer format (context + numbered plan with detail +
+     * risks + SUGGESTED_AGENTS). For claude-cli, this also passes
+     * `--permission-mode plan` for hard write-blocking enforcement.
+     *
+     * Mutually exclusive with planMode — if both are set, brainstormMode wins.
+     */
+    brainstormMode?: boolean;
   }): Promise<AgentTurnResult>;
 
   shutdown(): Promise<void>;

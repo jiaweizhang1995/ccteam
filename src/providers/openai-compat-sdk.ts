@@ -7,7 +7,7 @@ import type {
   ToolSpec,
 } from "./types.js";
 import { toolSpecsToOpenAI } from "./tools.js";
-import { PLAN_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
+import { PLAN_MODE_SYSTEM_SUFFIX, BRAINSTORM_MODE_SYSTEM_SUFFIX } from "./plan-mode.js";
 
 export interface OpenAICompatConfig {
   apiKey: string;
@@ -134,12 +134,18 @@ export class OpenAICompatBackend implements AgentBackend {
     signal: AbortSignal;
     onEvent(e: AgentEvent): void;
     planMode?: boolean;
+    brainstormMode?: boolean;
   }): Promise<AgentTurnResult> {
-    const { systemPrompt, messages, tools, signal, onEvent, planMode } = opts;
-    const effectiveTools = planMode ? [] : tools;
-    const effectiveSystem = planMode
-      ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
-      : systemPrompt;
+    const { systemPrompt, messages, tools, signal, onEvent, planMode, brainstormMode } = opts;
+    // SDK providers have no read-only tool filtering yet — both modes drop
+    // tools entirely. CLI-subprocess backends (codex-cli, claude-cli) are
+    // where brainstorm actually gets useful research capabilities.
+    const effectiveTools = (planMode || brainstormMode) ? [] : tools;
+    const effectiveSystem = brainstormMode
+      ? systemPrompt + BRAINSTORM_MODE_SYSTEM_SUFFIX
+      : planMode
+        ? systemPrompt + PLAN_MODE_SYSTEM_SUFFIX
+        : systemPrompt;
     const openaiTools = toolSpecsToOpenAI(effectiveTools);
 
     let resultText = "";
