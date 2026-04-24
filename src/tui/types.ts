@@ -52,7 +52,15 @@ export interface TaskItem {
 }
 
 export interface DisplayEvent {
-  id: number;
+  /**
+   * Stable React key. Must be globally unique across both ingestion paths
+   * (onLeadEvent stream + notifier's event_appended). Use namespaced
+   * prefixes — e.g. `s-1` for stream events, `e-42` for DB row 42 —
+   * because each path has its own monotonic counter and they WILL collide
+   * at low numbers otherwise (caused a key-conflict warning on
+   * /brainstorm startup in an earlier version).
+   */
+  id: string;
   kind: string;
   text: string;
   ts: number;

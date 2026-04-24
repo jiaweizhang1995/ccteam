@@ -46,7 +46,7 @@ function eventText(kind: string, payload: Record<string, unknown>): string {
 
 function appendEvent(
   events: DisplayEvent[],
-  id: number,
+  id: string,
   kind: string,
   payload: Record<string, unknown>,
   maxLines = 200,
@@ -83,8 +83,10 @@ export function useTeamState({
   }));
 
   // Called by TeamLead.onEvent — immediate streaming before DB write.
+  // Namespaces the id with `s-` (stream) so it cannot collide with ids
+  // minted from the notifier path (`e-<dbRowId>`).
   const onLeadEvent = useCallback((agent: string, kind: string, payload: Record<string, unknown>) => {
-    const id = ++globalEventId;
+    const id = `s-${++globalEventId}`;
     setAppState((s) => {
       if (agent === 'lead') {
         return { ...s, leadEvents: appendEvent(s.leadEvents, id, kind, payload) };
@@ -125,7 +127,12 @@ export function useTeamState({
     };
 
     const onEventAppended = (e: { type: 'event_appended'; event: { id: number; agent: string; kind: string; payload: string } }) => {
-      const { id, agent, kind } = e.event;
+      const { id: dbId, agent, kind } = e.event;
+      // Namespace DB-sourced ids with `e-` so they can't collide with
+      // the stream path's `s-N` ids. Previously both paths used bare
+      // numeric ids and collided at low values (e.g. both emit id=1 on
+      // the same tick → React key-conflict warning).
+      const id = `e-${dbId}`;
       let payload: Record<string, unknown> = {};
       try { payload = JSON.parse(e.event.payload) as Record<string, unknown>; } catch { /* ignore */ }
 

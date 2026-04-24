@@ -19,7 +19,7 @@ describe('long-event-truncate', () => {
       provider: 'stub',
       status: 'active',
       currentTaskId: null,
-      recentEvents: [{ id: 1, kind: 'text_delta', text: longText, ts: Date.now() }],
+      recentEvents: [{ id: 'e-1', kind: 'text_delta', text: longText, ts: Date.now() }],
     };
 
     const { lastFrame } = render(
@@ -44,7 +44,7 @@ describe('long-event-truncate', () => {
       provider: 'stub',
       status: 'idle',
       currentTaskId: null,
-      recentEvents: [{ id: 2, kind: 'text_delta', text: 'hello', ts: Date.now() }],
+      recentEvents: [{ id: 'e-2', kind: 'text_delta', text: 'hello', ts: Date.now() }],
     };
 
     const { lastFrame } = render(
