@@ -27,6 +27,15 @@ export function makeBroadcastHandler(state: StateFacade, identity: AgentIdentity
       });
     }
 
+    state.appendEvent({
+      team_name: identity.teamName,
+      agent: identity.agentName,
+      kind: 'message_sent',
+      // Body preview for pane readability (same pattern as send_message).
+      payload: JSON.stringify({ to: 'all', recipient_count: recipients.length, text: args.body.slice(0, 200) }),
+      created_at: Date.now(),
+    });
+
     return { content: [{ type: 'text' as const, text: `Broadcast sent to ${recipients.length} teammate(s)` }] };
   };
 }

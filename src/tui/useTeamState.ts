@@ -28,15 +28,50 @@ function teammateStateFromRow(tm: Teammate): TeammateState {
   };
 }
 
+/**
+ * `message_received` payloads wrap the actual body in a JSON string so we
+ * can parse out the `text` field for a readable preview. If the body isn't
+ * valid JSON or doesn't have a text field, fall back to the raw string.
+ */
+function extractMessageText(raw: unknown): string {
+  const s = String(raw ?? '');
+  if (!s) return '';
+  if (s.startsWith('{')) {
+    try {
+      const obj = JSON.parse(s) as { text?: string; plan?: string; body?: string };
+      return obj.text ?? obj.plan ?? obj.body ?? s;
+    } catch {
+      return s;
+    }
+  }
+  return s;
+}
+
 function eventText(kind: string, payload: Record<string, unknown>): string {
   switch (kind) {
     case 'text_delta': return String(payload.text ?? payload.delta ?? '');
     case 'tool_call': return `[tool] ${payload.name}`;
     case 'tool_result': return `[result] ${String(payload.content ?? '').slice(0, 80)}`;
-    case 'message_received': return `[msg from ${payload.from}] ${String(payload.body ?? '').slice(0, 80)}`;
-    case 'message_sent': return `[msg to ${payload.to}]`;
+    case 'message_received': {
+      const preview = extractMessageText(payload.body).slice(0, 200);
+      return preview
+        ? `[←${payload.from}] ${preview}`
+        : `[←${payload.from}]`;
+    }
+    case 'message_sent': {
+      // Prefer the `text` body preview if send_message wrote one into the
+      // event payload (recent ccteam versions do this — see mcp-server/
+      // tools/send_message.ts). Older events only have `to`.
+      const preview = String(payload.text ?? '').slice(0, 200);
+      return preview
+        ? `[→${payload.to}] ${preview}`
+        : `[→${payload.to}]`;
+    }
+    case 'task_created': return `[created] ${payload.title ?? payload.taskId}`;
     case 'task_claimed': return `[claimed] ${payload.title ?? payload.taskId}`;
     case 'task_completed': return `[completed] ${payload.title ?? payload.taskId}`;
+    case 'plan_submitted': return '[plan submitted]';
+    case 'plan_decided': return `[plan ${payload.decision}] ${payload.teammate ?? ''}`.trim();
     case 'teammate_spawned': return `[spawned] ${payload.name}`;
     case 'error': return `[error] ${payload.message}`;
     case 'done': return '[done]';

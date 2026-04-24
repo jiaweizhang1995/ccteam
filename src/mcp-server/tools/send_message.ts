@@ -29,6 +29,16 @@ export function makeSendMessageHandler(state: StateFacade, identity: AgentIdenti
       body: JSON.stringify({ text: args.body }),
       created_at: Date.now(),
     });
+    state.appendEvent({
+      team_name: identity.teamName,
+      agent: identity.agentName,
+      kind: 'message_sent',
+      // Include a body preview in the event payload so TUI panes can
+      // render more than just "[msg to X]". Full body stays in the
+      // messages table; this is just a human-readable breadcrumb.
+      payload: JSON.stringify({ to: args.to, text: args.body.slice(0, 200) }),
+      created_at: Date.now(),
+    });
 
     return { content: [{ type: 'text' as const, text: `Message sent to ${args.to}` }] };
   };
