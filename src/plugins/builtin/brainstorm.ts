@@ -44,6 +44,9 @@ export const brainstormBuiltin: BuiltinHandler = async (ctx) => {
     return;
   }
 
-  ctx.emit('brainstorm_started', { goal });
+  // NOTE: we intentionally do NOT emit a `brainstorm_started` stream event
+  // here — lead.startBrainstorm writes that row to state.events, which the
+  // notifier surfaces into the lead pane ~100ms later. Emitting from both
+  // places duplicates the marker (double `[brainstorm_started]`).
   ctx.startBrainstorm(goal);
 };

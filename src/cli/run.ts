@@ -85,10 +85,13 @@ export async function runInteractive(prompt: string, opts: RunOptions): Promise<
         streaming: false,
         latest: result,
       }));
-      onLeadEventRef?.('lead', 'brainstorm_turn_completed', {
-        steps: result.steps.length,
-        suggestedAgents: result.suggestedAgents,
-      });
+      // NOTE: we intentionally do NOT stream a `brainstorm_turn_completed`
+      // event here — _runBrainstormTurn already appended that row to
+      // state.events, which the notifier surfaces into the lead pane. Emitting
+      // from both paths produces a duplicate `[brainstorm_turn_completed]`.
+      // The banner updates instantly via setBrainstormStateRef above; the
+      // event marker arrives ~100ms later via the notifier poll, which is
+      // fine UX.
     }).catch((err: unknown) => {
       if (err instanceof Error && err.name === 'AbortError') return;
       onLeadEventRef?.('lead', 'error', { message: err instanceof Error ? err.message : String(err) });

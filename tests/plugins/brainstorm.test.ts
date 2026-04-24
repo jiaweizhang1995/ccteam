@@ -48,15 +48,20 @@ describe('brainstormBuiltin', () => {
     expect(starts).toEqual(['build a todo CLI']);
   });
 
-  it('emits brainstorm_started before calling startBrainstorm', async () => {
-    const order: string[] = [];
+  it('does not stream-emit brainstorm_started (would duplicate the DB-path event)', async () => {
+    // lead.startBrainstorm writes `brainstorm_started` to state.events; the
+    // notifier surfaces that into the lead pane. If the builtin also calls
+    // ctx.emit('brainstorm_started', ...), the marker lands twice in the UI.
+    // This test freezes the "single-source-of-truth" rule for that event.
+    const emitted: string[] = [];
+    let startCalled = false;
     await brainstormBuiltin(mkCtx({
       args: 'write tests',
-      emit: (kind) => { order.push(`emit:${kind}`); },
-      startBrainstorm: () => { order.push('start'); },
+      emit: (kind) => { emitted.push(kind); },
+      startBrainstorm: () => { startCalled = true; },
     }));
-    // emit must land before start so the TUI shows the banner before any stream begins.
-    expect(order.indexOf('emit:brainstorm_started')).toBeLessThan(order.indexOf('start'));
+    expect(startCalled).toBe(true);
+    expect(emitted).not.toContain('brainstorm_started');
   });
 
   it('prints usage error when goal is empty', async () => {
