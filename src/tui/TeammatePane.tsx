@@ -17,10 +17,20 @@ interface Props {
   width: number;
 }
 
+// Mirror LeadPane: wrap free-form content events (assistant text, incoming
+// messages, tool results), truncate short status markers. Keeps long text
+// readable without exploding the log with wrapped marker lines.
+const CONTENT_EVENT_KINDS = new Set([
+  'text_delta',
+  'message_received',
+  'tool_result',
+]);
+
 function EventLine({ event }: { event: DisplayEvent }) {
   const color = event.kind === 'error' ? 'red' : event.kind === 'tool_call' ? 'cyan' : 'white';
+  const wrapMode = CONTENT_EVENT_KINDS.has(event.kind) ? 'wrap' : 'truncate';
   return (
-    <Text color={color} wrap="truncate">
+    <Text color={color} wrap={wrapMode}>
       {event.text}
     </Text>
   );

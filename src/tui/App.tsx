@@ -143,6 +143,35 @@ export function App({ initialState, onSendMessage, onInterrupt, onPlanRequest, o
               </Text>
             )}
           </Box>
+
+          {/*
+            Plan preview. LeadPane truncates each event to one line so
+            long plan text flowing through as text_delta fragments was
+            effectively invisible — the user complaint that kicked off
+            this panel. Render `brainstormState.latest` here with full
+            wrapping so the current plan is always legible.
+
+            Prefer parsed steps when available (each step as its own line,
+            numbered). Fall back to rawText when parsing returned nothing
+            useful (e.g. lead responded with discussion rather than a
+            numbered plan — we still want to show what it said).
+          */}
+          {brainstormState.latest && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="magenta" bold>current plan:</Text>
+              {brainstormState.latest.steps.length > 0 ? (
+                brainstormState.latest.steps.map((step, i) => (
+                  <Text key={`step-${i}`} wrap="wrap">
+                    <Text color="cyan">{i + 1}. </Text>
+                    <Text>{step}</Text>
+                  </Text>
+                ))
+              ) : (
+                <Text wrap="wrap" color="white">{brainstormState.latest.rawText}</Text>
+              )}
+            </Box>
+          )}
+
           <Text color="gray" dimColor>
             send messages to refine · /go to execute · /cancel to abort
           </Text>
